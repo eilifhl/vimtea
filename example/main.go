@@ -7,7 +7,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/kujtimiihoxha/vimtea"
+	"github.com/eilifhl/vimtea"
 )
 
 func main() {
