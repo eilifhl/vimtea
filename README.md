@@ -26,7 +26,7 @@ VimTea is a lightweight, Vim-inspired text editor for the terminal, built with G
 ## Installation
 
 ```bash
-go get github.com/kujtimiihoxha/vimtea
+go get github.com/eilifhl/vimtea
 ```
 
 ## Code Structure

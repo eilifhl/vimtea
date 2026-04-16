@@ -1,4 +1,4 @@
-module github.com/kujtimiihoxha/vimtea
+module github.com/eilifhl/vimtea
 
 go 1.23.5
 
