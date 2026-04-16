@@ -10,6 +10,25 @@ import (
 	"github.com/eilifhl/vimtea"
 )
 
+func loadExampleSource() ([]byte, string, error) {
+	candidates := []string{
+		"main.go",
+		"example/main.go",
+	}
+
+	for _, path := range candidates {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			return data, path, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, "", err
+		}
+	}
+
+	return nil, "", os.ErrNotExist
+}
+
 func main() {
 	// Create a log file
 	logFile, err := os.OpenFile("debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
@@ -21,28 +40,16 @@ func main() {
 	// Set log output to the file
 	log.SetOutput(logFile)
 
-	file, err := os.Open("example/main.go")
+	buf, filePath, err := loadExampleSource()
 	if err != nil {
-		log.Fatalf("Failed to open example/main.go: %v", err)
-	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		log.Fatalf("Failed to get file stat: %v", err)
-	}
-	// Read the file
-	buf := make([]byte, stat.Size())
-	_, err = file.Read(buf)
-	if err != nil {
-		log.Fatalf("Failed to read file: %v", err)
+		log.Fatalf("Failed to open source file: %v", err)
 	}
 
 	// Create a new editor with the file contents
 	// WithFileName is used for syntax highlighting
 	editor := vimtea.NewEditor(
 		vimtea.WithContent(string(buf)),
-		vimtea.WithFileName("example/main.go"),
+		vimtea.WithFileName(filePath),
 		vimtea.WithFullScreen(),
 	)
 

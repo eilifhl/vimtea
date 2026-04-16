@@ -4,7 +4,6 @@
 package vimtea
 
 import (
-	"context"
 	"strconv"
 	"strings"
 	"time"
@@ -12,8 +11,6 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-
-	"golang.design/x/clipboard"
 )
 
 // EditorMode represents the current mode of the editor
@@ -169,8 +166,6 @@ func NewEditor(opts ...EditorOption) Editor {
 		opt(options)
 	}
 
-	cpErr := clipboard.Init()
-
 	m := &editorModel{
 		buffer:                 newBuffer(options.Content),
 		mode:                   ModeNormal,
@@ -199,14 +194,7 @@ func NewEditor(opts ...EditorOption) Editor {
 		commands:       newCommandRegistry(),
 		initialContent: options.Content,
 	}
-	go func() {
-		if cpErr != nil {
-			ch := clipboard.Watch(context.Background(), clipboard.FmtText)
-			for data := range ch {
-				m.yankBuffer = string(data)
-			}
-		}
-	}()
+	startClipboardWatcher(m)
 
 	// Register default key bindings
 	registerBindings(m)
