@@ -148,6 +148,244 @@ func TestCursorMovementCommands(t *testing.T) {
 	assert.Equal(t, 0, model.cursor.Col, "h command should decrease col by 1")
 }
 
+func TestDeleteWordAndReplaceCharacterCommands(t *testing.T) {
+	editor := NewEditor(WithContent("foo bar"))
+	model := editor.(*editorModel)
+
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+	updated, _ := model.Update(keyMsg)
+	updatedModel := updated.(*editorModel)
+
+	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'w'}}
+	updated, _ = updatedModel.Update(keyMsg)
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "bar", updatedModel.buffer.text(), "dw should delete the current word and the following space")
+
+	editor = NewEditor(WithContent("hello"))
+	model = editor.(*editorModel)
+
+	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}
+	updated, _ = model.Update(keyMsg)
+	updatedModel = updated.(*editorModel)
+
+	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}
+	updated, _ = updatedModel.Update(keyMsg)
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "xello", updatedModel.buffer.text(), "r should replace the character under the cursor")
+	assert.False(t, updatedModel.pendingReplace, "Replace state should clear after the replacement character is used")
+}
+
+func TestOperatorPendingDeleteMotions(t *testing.T) {
+	editor := NewEditor(WithContent("hello world\nsecond line"))
+	model := editor.(*editorModel)
+
+	model.cursor = newCursor(0, 5)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updatedModel := updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, " world\nsecond line", updatedModel.buffer.text(), "d0 should delete back to the start of the line")
+
+	editor = NewEditor(WithContent("pre (hello) post"))
+	model = editor.(*editorModel)
+	model.cursor = newCursor(0, 6)
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'('}})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "pre  post", updatedModel.buffer.text(), "da( should delete the parens and their contents")
+}
+
+func TestInsertModeDeleteForward(t *testing.T) {
+	editor := NewEditor(WithContent("hello"))
+	model := editor.(*editorModel)
+
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ := model.Update(keyMsg)
+	updatedModel := updated.(*editorModel)
+
+	updatedModel.cursor = newCursor(0, 1)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyDelete})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hllo", updatedModel.buffer.text(), "delete should delete the character under the cursor in insert mode")
+
+	updatedModel.cursor = newCursor(0, len(updatedModel.buffer.Line(0)))
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hllo", updatedModel.buffer.text(), "delete at end of line should be a no-op")
+}
+
+func TestInsertModeEmacsMotions(t *testing.T) {
+	editor := NewEditor(WithContent("hello world\nsecond line"))
+	model := editor.(*editorModel)
+
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ := model.Update(keyMsg)
+	updatedModel := updated.(*editorModel)
+
+	updatedModel.cursor = newCursor(0, 5)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 0, updatedModel.cursor.Col, "ctrl+a should move to the start of the line in insert mode")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlE})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 10, updatedModel.cursor.Col, "ctrl+e should move to the end of the line in insert mode")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 9, updatedModel.cursor.Col, "ctrl+b should move left in insert mode")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 10, updatedModel.cursor.Col, "ctrl+f should move right in insert mode")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}, Alt: true})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 6, updatedModel.cursor.Col, "alt+b should move to the previous word in insert mode")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}, Alt: true})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 10, updatedModel.cursor.Col, "alt+f should move to the next word in insert mode")
+
+	updatedModel.cursor = newCursor(0, 12)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlLeft})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 6, updatedModel.cursor.Col, "ctrl+left should move to the previous word in insert mode")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 12, updatedModel.cursor.Col, "ctrl+right should move to the next word in insert mode")
+}
+
+func TestInsertModeEmacsKillAndYankCommands(t *testing.T) {
+	editor := NewEditor(WithContent("hello brave world"))
+	model := editor.(*editorModel)
+
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ := model.Update(keyMsg)
+	updatedModel := updated.(*editorModel)
+
+	updatedModel.cursor = newCursor(0, 6)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hello ", updatedModel.buffer.text(), "ctrl+k should kill to the end of the line")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hello brave world", updatedModel.buffer.text(), "ctrl+y should yank the last killed text back into the buffer")
+
+	updatedModel.cursor = newCursor(0, 12)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "world", updatedModel.buffer.text(), "ctrl+u should kill to the start of the line")
+}
+
+func TestInsertModeWordDeletionMacros(t *testing.T) {
+	editor := NewEditor(WithContent("hello brave world"))
+	model := editor.(*editorModel)
+
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ := model.Update(keyMsg)
+	updatedModel := updated.(*editorModel)
+
+	updatedModel.cursor = newCursor(0, 12)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hello world", updatedModel.buffer.text(), "ctrl+w should delete the previous word")
+
+	editor = NewEditor(WithContent("hello brave world"))
+	model = editor.(*editorModel)
+	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ = model.Update(keyMsg)
+	updatedModel = updated.(*editorModel)
+
+	updatedModel.cursor = newCursor(0, 6)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}, Alt: true})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hello world", updatedModel.buffer.text(), "alt+d should delete the next word")
+}
+
+func TestInsertModeTransposeCharacters(t *testing.T) {
+	editor := NewEditor(WithContent("teh"))
+	model := editor.(*editorModel)
+
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ := model.Update(keyMsg)
+	updatedModel := updated.(*editorModel)
+
+	updatedModel.cursor = newCursor(0, 2)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "the", updatedModel.buffer.text(), "ctrl+t should transpose adjacent characters")
+}
+
+func TestInnerParenCommands(t *testing.T) {
+	editor := NewEditor(WithContent("prefix (hello world) suffix"))
+	model := editor.(*editorModel)
+
+	model.cursor = newCursor(0, 10)
+
+	keyMsg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}}
+	updated, _ := model.Update(keyMsg)
+	updatedModel := updated.(*editorModel)
+
+	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ = updatedModel.Update(keyMsg)
+	updatedModel = updated.(*editorModel)
+
+	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}}
+	updated, _ = updatedModel.Update(keyMsg)
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "prefix () suffix", updatedModel.buffer.text(), "cib should delete the inner parenthesized contents")
+	assert.Equal(t, ModeInsert, updatedModel.mode, "cib should switch to insert mode")
+	assert.Equal(t, 8, updatedModel.cursor.Col, "cib should leave the cursor inside the parentheses")
+}
+
+func TestInnerAndAroundQuoteCommands(t *testing.T) {
+	editor := NewEditor(WithContent(`prefix "hello world" suffix`))
+	model := editor.(*editorModel)
+
+	model.cursor = newCursor(0, 10)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updatedModel := updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'"'}})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, `prefix "" suffix`, updatedModel.buffer.text(), `ci" should delete the contents inside double quotes`)
+	assert.Equal(t, ModeInsert, updatedModel.mode, `ci" should switch to insert mode`)
+	assert.Equal(t, 8, updatedModel.cursor.Col, `ci" should leave the cursor inside the quotes`)
+
+	editor = NewEditor(WithContent(`prefix 'hello world' suffix`))
+	model = editor.(*editorModel)
+	model.cursor = newCursor(0, 10)
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\''}})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, `prefix  suffix`, updatedModel.buffer.text(), `da' should delete the contents and surrounding single quotes`)
+}
+
 func TestWrappedMovementCommands(t *testing.T) {
 	editor := NewEditor(WithContent("Line 1\nLine 2\nLine 3"))
 	model := editor.(*editorModel)

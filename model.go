@@ -86,6 +86,9 @@ type editorModel struct {
 	desiredCol        int        // Desired column position for vertical movements
 	keySequence       []string   // Current key sequence for vim-like commands
 	lastKeyTime       time.Time  // Time of the last keypress for sequence timeout
+	pendingReplace    bool       // Waiting for the replacement character after pressing r
+	pendingOperator   string     // Pending normal-mode operator such as d, c, or y
+	operatorSequence  []string   // Keys collected after a pending operator
 	commandBuffer     string     // Command mode input buffer
 	visualStart       Cursor     // Start position of visual selection
 	isVisualLine      bool       // Whether we're in line-wise visual mode (V)
@@ -322,8 +325,43 @@ func (m *editorModel) SetSize(width, height int) (tea.Model, tea.Cmd) {
 
 // handleKeypress processes keyboard input based on the current editor mode
 func (m *editorModel) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.pendingReplace {
+		if msg.Type == tea.KeyEsc {
+			m.pendingReplace = false
+			return m, nil
+		}
+
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && !msg.Alt {
+			m.pendingReplace = false
+			return replaceCharacterAtCursor(m, string(msg.Runes[0]))
+		}
+
+		m.pendingReplace = false
+	}
+
 	switch m.mode {
 	case ModeNormal:
+		if m.pendingOperator != "" {
+			return m.handleOperatorKeypress(msg)
+		}
+
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 'r' && !msg.Alt {
+			m.keySequence = []string{}
+			m.countPrefix = 1
+			m.pendingReplace = true
+			return m, nil
+		}
+
+		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && !msg.Alt {
+			switch msg.Runes[0] {
+			case 'd', 'c', 'y':
+				m.pendingOperator = string(msg.Runes[0])
+				m.operatorSequence = []string{}
+				m.keySequence = []string{}
+				return m, nil
+			}
+		}
+
 		// Normal mode uses key sequence handling for multi-key commands
 		return m.handlePrefixKeypress(ModeNormal)(msg)
 
@@ -565,6 +603,9 @@ func (m *editorModel) Reset() tea.Cmd {
 	// Reset editor state
 	m.yankBuffer = ""
 	m.keySequence = []string{}
+	m.pendingReplace = false
+	m.pendingOperator = ""
+	m.operatorSequence = nil
 	m.mode = ModeNormal
 	m.commandBuffer = ""
 	m.desiredCol = 0

@@ -19,6 +19,7 @@ VimTea is a lightweight, Vim-inspired text editor for the terminal, built with G
 - Command mode
 - Clipboard operations (yank, delete, paste)
 - Word operations
+- Operator-pending motions and text objects for `d`, `c`, and `y`
 - Extensible architecture
 - Custom key bindings
 - Customizable highlighting
@@ -230,6 +231,8 @@ func main() {
 - `x`: Delete character at cursor
 - `dd`: Delete line
 - `D`: Delete from cursor to end of line
+- `dw`: Delete word
+- `d0`, `d$`, `dgg`, `dG`: Delete with motions
 - `yy`: Yank (copy) line
 - `p`: Paste after cursor
 - `P`: Paste before cursor
@@ -240,6 +243,14 @@ func main() {
 - `diw`: Delete inner word
 - `yiw`: Yank inner word
 - `ciw`: Change inner word
+- `daw` / `caw` / `yaw`: Around-word text object
+- `di(`: Delete inner parentheses
+- `yi(`: Yank inner parentheses
+- `ci(`: Change inner parentheses
+- `da(` / `ca(` / `ya(`: Around-parentheses text object
+- `dib` / `yib` / `cib`: Same inner-parentheses operations using `b`
+- `cw`: Change word
+- `r<char>`: Replace the character under the cursor
 - `zr`: Toggle relative line numbers
 - `q`: Quit
 
@@ -247,6 +258,18 @@ func main() {
 
 - `esc`: Return to normal mode
 - Arrow keys: Navigate
+- `ctrl+a` / `ctrl+e`: Jump to start or end of line
+- `ctrl+b` / `ctrl+f`: Move left or right one character
+- `ctrl+left` / `ctrl+right`: Jump to previous or next word
+- `ctrl+p` / `ctrl+n`: Move up or down one line
+- `ctrl+d` / `delete`: Delete the character under the cursor
+- `ctrl+k`: Kill to end of line
+- `ctrl+u`: Kill to start of line
+- `ctrl+w` / `alt+backspace`: Delete previous word
+- `alt+d`: Delete next word
+- `ctrl+y`: Yank text back into the buffer
+- `ctrl+t`: Transpose adjacent characters
+- `alt+b` / `alt+f`: Jump to previous or next word
 - Regular typing inserts text
 
 ### Visual Mode
