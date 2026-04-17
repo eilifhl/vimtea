@@ -2039,61 +2039,11 @@ func performQuoteOperation(model *editorModel, quote byte, around bool, operatio
 }
 
 func getInnerParenBoundary(model *editorModel) (int, int, bool) {
-	line := model.buffer.Line(model.cursor.Row)
-	if len(line) == 0 {
+	start, end, ok := getDelimitedBoundary(model, '(', ')', false)
+	if !ok {
 		return 0, 0, false
 	}
-
-	type pair struct {
-		open  int
-		close int
-	}
-
-	var stack []int
-	var pairs []pair
-
-	for i := 0; i < len(line); i++ {
-		switch line[i] {
-		case '(':
-			stack = append(stack, i)
-		case ')':
-			if len(stack) == 0 {
-				continue
-			}
-			open := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			pairs = append(pairs, pair{open: open, close: i})
-		}
-	}
-
-	cursorCol := model.cursor.Col
-	bestOpen, bestClose := -1, -1
-	bestSpan := 0
-
-	for _, p := range pairs {
-		if cursorCol < p.open || cursorCol > p.close {
-			continue
-		}
-
-		innerOpen := p.open + 1
-		innerClose := p.close - 1
-		if innerOpen > innerClose {
-			continue
-		}
-
-		span := p.close - p.open
-		if bestOpen == -1 || span < bestSpan {
-			bestOpen = innerOpen
-			bestClose = innerClose
-			bestSpan = span
-		}
-	}
-
-	if bestOpen == -1 {
-		return 0, 0, false
-	}
-
-	return bestOpen, bestClose, true
+	return start, end, true
 }
 
 func getAroundParenBoundary(model *editorModel) (int, int, bool) {
@@ -2126,25 +2076,13 @@ func getQuoteBoundary(model *editorModel, quote byte, around bool) (int, int, bo
 		return 0, 0, false, false
 	}
 
-	cursorCol := model.cursor.Col
-	bestOpen, bestClose := -1, -1
-	bestSpan := 0
+	var pairs []boundaryPair
 	for i := 0; i+1 < len(quotePositions); i += 2 {
-		open := quotePositions[i]
-		close := quotePositions[i+1]
-		if cursorCol < open || cursorCol > close {
-			continue
-		}
-
-		span := close - open
-		if bestOpen == -1 || span < bestSpan {
-			bestOpen = open
-			bestClose = close
-			bestSpan = span
-		}
+		pairs = append(pairs, boundaryPair{open: quotePositions[i], close: quotePositions[i+1]})
 	}
 
-	if bestOpen == -1 {
+	bestOpen, bestClose, ok := choosePairForCursor(model.cursor.Col, pairs)
+	if !ok {
 		return 0, 0, false, false
 	}
 

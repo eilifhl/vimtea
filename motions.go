@@ -25,6 +25,11 @@ type motionSpec struct {
 	object byte
 }
 
+type boundaryPair struct {
+	open  int
+	close int
+}
+
 func directMotionCommand(kind string) Command {
 	return func(m *editorModel) tea.Cmd {
 		moveByMotion(m, motionSpec{kind: kind}, max(1, m.countPrefix), m.hasCountPrefix)
@@ -749,13 +754,8 @@ func getDelimitedBoundary(model *editorModel, open, close byte, around bool) (in
 		return 0, 0, false
 	}
 
-	type pair struct {
-		open  int
-		close int
-	}
-
 	var stack []int
-	var pairs []pair
+	var pairs []boundaryPair
 	for i := 0; i < len(line); i++ {
 		switch line[i] {
 		case open:
@@ -766,25 +766,12 @@ func getDelimitedBoundary(model *editorModel, open, close byte, around bool) (in
 			}
 			match := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
-			pairs = append(pairs, pair{open: match, close: i})
+			pairs = append(pairs, boundaryPair{open: match, close: i})
 		}
 	}
 
-	cursorCol := model.cursor.Col
-	bestOpen, bestClose := -1, -1
-	bestSpan := 0
-	for _, pair := range pairs {
-		if cursorCol < pair.open || cursorCol > pair.close {
-			continue
-		}
-		span := pair.close - pair.open
-		if bestOpen == -1 || span < bestSpan {
-			bestOpen = pair.open
-			bestClose = pair.close
-			bestSpan = span
-		}
-	}
-	if bestOpen == -1 {
+	bestOpen, bestClose, ok := choosePairForCursor(model.cursor.Col, pairs)
+	if !ok {
 		return 0, 0, false
 	}
 	if around {
@@ -794,6 +781,39 @@ func getDelimitedBoundary(model *editorModel, open, close byte, around bool) (in
 		return 0, 0, false
 	}
 	return bestOpen + 1, bestClose - 1, true
+}
+
+func choosePairForCursor(cursorCol int, pairs []boundaryPair) (int, int, bool) {
+	bestOpen, bestClose := -1, -1
+	bestScore := 0
+	bestSpan := 0
+
+	for _, pair := range pairs {
+		span := pair.close - pair.open
+		score := pairDistance(cursorCol, pair.open, pair.close)
+
+		if bestOpen == -1 || score < bestScore || (score == bestScore && span < bestSpan) || (score == bestScore && span == bestSpan && pair.open > bestOpen && cursorCol < pair.open) {
+			bestOpen = pair.open
+			bestClose = pair.close
+			bestScore = score
+			bestSpan = span
+		}
+	}
+
+	if bestOpen == -1 {
+		return 0, 0, false
+	}
+	return bestOpen, bestClose, true
+}
+
+func pairDistance(cursorCol, open, close int) int {
+	if cursorCol < open {
+		return open - cursorCol
+	}
+	if cursorCol > close {
+		return cursorCol - close
+	}
+	return 0
 }
 
 func getBigWordBoundary(model *editorModel) (int, int) {

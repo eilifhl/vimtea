@@ -364,6 +364,19 @@ func TestInnerParenCommands(t *testing.T) {
 	assert.Equal(t, "prefix () suffix", updatedModel.buffer.text(), "cib should delete the inner parenthesized contents")
 	assert.Equal(t, ModeInsert, updatedModel.mode, "cib should switch to insert mode")
 	assert.Equal(t, 8, updatedModel.cursor.Col, "cib should leave the cursor inside the parentheses")
+
+	editor = NewEditor(WithContent("prefix (hello world) suffix"))
+	model = editor.(*editorModel)
+	model.cursor = newCursor(0, 0)
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "prefix () suffix", updatedModel.buffer.text(), "cib should also target the nearest parentheses when outside them")
 }
 
 func TestInnerAndAroundQuoteCommands(t *testing.T) {
@@ -382,6 +395,19 @@ func TestInnerAndAroundQuoteCommands(t *testing.T) {
 	assert.Equal(t, `prefix "" suffix`, updatedModel.buffer.text(), `ci" should delete the contents inside double quotes`)
 	assert.Equal(t, ModeInsert, updatedModel.mode, `ci" should switch to insert mode`)
 	assert.Equal(t, 8, updatedModel.cursor.Col, `ci" should leave the cursor inside the quotes`)
+
+	editor = NewEditor(WithContent(`prefix "hello world" suffix`))
+	model = editor.(*editorModel)
+	model.cursor = newCursor(0, 0)
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'"'}})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, `prefix "" suffix`, updatedModel.buffer.text(), `ci" should also target the nearest quotes when outside them`)
 
 	editor = NewEditor(WithContent(`prefix 'hello world' suffix`))
 	model = editor.(*editorModel)
