@@ -36,6 +36,7 @@ func switchMode(model *editorModel, newMode EditorMode) tea.Cmd {
 	model.pendingReplace = false
 	model.pendingOperator = ""
 	model.operatorSequence = nil
+	model.pendingFind = nil
 
 	switch newMode {
 	case ModeNormal:
@@ -49,6 +50,11 @@ func switchMode(model *editorModel, newMode EditorMode) tea.Cmd {
 	case ModeCommand:
 		// Reset command buffer when entering command mode
 		model.commandBuffer = ""
+	}
+
+	if newMode != ModeInsert {
+		model.lastInsertAction = insertActionNone
+		model.lastYankRange = nil
 	}
 
 	return func() tea.Msg {
@@ -110,13 +116,32 @@ func registerBindings(m *editorModel) {
 		m.registry.Add("l", moveCursorRight, mode, "Move cursor right")
 		m.registry.Add("w", moveToNextWordStart, mode, "Move to next word")
 		m.registry.Add("b", moveToPrevWordStart, mode, "Move to previous word")
+		m.registry.Add("W", directMotionCommand("W"), mode, "Move to next WORD")
+		m.registry.Add("B", directMotionCommand("B"), mode, "Move to previous WORD")
+		m.registry.Add("e", directMotionCommand("e"), mode, "Move to end of word")
+		m.registry.Add("E", directMotionCommand("E"), mode, "Move to end of WORD")
+		m.registry.Add("ge", directMotionCommand("ge"), mode, "Move to end of previous word")
+		m.registry.Add("gE", directMotionCommand("gE"), mode, "Move to end of previous WORD")
 
 		m.registry.Add(" ", moveCursorRightOrNextLine, mode, "Move cursor right")
 		m.registry.Add("0", moveToStartOfLine, mode, "Move to start of line")
 		m.registry.Add("^", moveToFirstNonWhitespace, mode, "Move to first non-whitespace character")
 		m.registry.Add("$", moveToEndOfLine, mode, "Move to end of line")
+		m.registry.Add("g_", directMotionCommand("g_"), mode, "Move to last non-whitespace character")
 		m.registry.Add("gg", moveToStartOfDocument, mode, "Move to document start")
 		m.registry.Add("G", moveToEndOfDocument, mode, "Move to document end")
+		m.registry.Add("%", directMotionCommand("%"), mode, "Move to matching bracket")
+		m.registry.Add("{", directMotionCommand("{"), mode, "Move to previous paragraph")
+		m.registry.Add("}", directMotionCommand("}"), mode, "Move to next paragraph")
+		m.registry.Add("H", directMotionCommand("H"), mode, "Move to top of screen")
+		m.registry.Add("M", directMotionCommand("M"), mode, "Move to middle of screen")
+		m.registry.Add("L", directMotionCommand("L"), mode, "Move to bottom of screen")
+		m.registry.Add("f", beginFindMotion("f"), mode, "Find character forward")
+		m.registry.Add("F", beginFindMotion("F"), mode, "Find character backward")
+		m.registry.Add("t", beginFindMotion("t"), mode, "Move before character forward")
+		m.registry.Add("T", beginFindMotion("T"), mode, "Move after character backward")
+		m.registry.Add(";", repeatLastFind(false), mode, "Repeat latest find")
+		m.registry.Add(",", repeatLastFind(true), mode, "Repeat latest find in reverse")
 
 		m.registry.Add("up", moveCursorUp, mode, "Move cursor up")
 		m.registry.Add("down", moveCursorDown, mode, "Move cursor down")
@@ -144,10 +169,13 @@ func registerBindings(m *editorModel) {
 	m.registry.Add("ctrl+y", handleInsertYank, ModeInsert, "Yank text")
 	m.registry.Add("alt+d", handleInsertDeleteNextWord, ModeInsert, "Delete next word")
 	m.registry.Add("alt+backspace", handleInsertDeletePreviousWord, ModeInsert, "Delete previous word")
+	m.registry.Add("alt+y", handleInsertYankPop, ModeInsert, "Cycle yanked text")
 	m.registry.Add("ctrl+t", handleInsertTransposeCharacters, ModeInsert, "Transpose characters")
+	m.registry.Add("alt+t", handleInsertTransposeWords, ModeInsert, "Transpose words")
 	m.registry.Add("ctrl+_", undo, ModeInsert, "Undo")
 	m.registry.Add("tab", handleInsertTab, ModeInsert, "Tab")
 	m.registry.Add("enter", handleInsertEnterKey, ModeInsert, "Enter")
+	m.registry.Add("ctrl+o", handleInsertOpenLine, ModeInsert, "Open line")
 	m.registry.Add("ctrl+a", moveToStartOfLine, ModeInsert, "Move to start of line")
 	m.registry.Add("ctrl+e", moveToEndOfLine, ModeInsert, "Move to end of line")
 	m.registry.Add("ctrl+b", moveCursorLeft, ModeInsert, "Move cursor left")
@@ -156,6 +184,8 @@ func registerBindings(m *editorModel) {
 	m.registry.Add("ctrl+n", moveCursorDown, ModeInsert, "Move cursor down")
 	m.registry.Add("alt+b", moveToPrevWordStart, ModeInsert, "Move to previous word")
 	m.registry.Add("alt+f", moveToNextWordStart, ModeInsert, "Move to next word")
+	m.registry.Add("alt+<", directMotionCommand("gg"), ModeInsert, "Move to start of document")
+	m.registry.Add("alt+>", directMotionCommand("G"), ModeInsert, "Move to end of document")
 	m.registry.Add("ctrl+left", moveToPrevWordStart, ModeInsert, "Move to previous word")
 	m.registry.Add("ctrl+right", moveToNextWordStart, ModeInsert, "Move to next word")
 	m.registry.Add("up", handleArrowKeys("up"), ModeInsert, "Move cursor up")
@@ -320,6 +350,7 @@ func insertCharacter(model *editorModel, char string) (tea.Model, tea.Cmd) {
 	newLine := line[:model.cursor.Col] + char + line[model.cursor.Col:]
 	model.buffer.setLine(model.cursor.Row, newLine)
 	model.cursor.Col++
+	model.noteInsertAction(insertActionSelfInsert)
 
 	return model, nil
 }
@@ -340,6 +371,7 @@ func handleInsertBackspace(model *editorModel) tea.Cmd {
 		model.cursor.Row--
 		model.cursor.Col = prevLineLen
 	}
+	model.noteInsertAction(insertActionSelfInsert)
 	return nil
 }
 
@@ -351,6 +383,7 @@ func handleInsertDeleteForward(model *editorModel) tea.Cmd {
 
 	model.buffer.saveUndoState(model.cursor)
 	model.buffer.deleteAt(model.cursor.Row, model.cursor.Col, model.cursor.Row, model.cursor.Col)
+	model.noteInsertAction(insertActionSelfInsert)
 	return nil
 }
 
@@ -360,8 +393,7 @@ func handleInsertKillToEndOfLine(model *editorModel) tea.Cmd {
 	if len(line) == 0 {
 		if row < model.buffer.lineCount()-1 {
 			model.buffer.saveUndoState(model.cursor)
-			model.yankBuffer = "\n"
-			writeClipboardText(model.yankBuffer)
+			model.pushKill("\n", false)
 			model.buffer.joinLines(row, row+1)
 		}
 		return nil
@@ -370,8 +402,7 @@ func handleInsertKillToEndOfLine(model *editorModel) tea.Cmd {
 	if model.cursor.Col >= len(line) {
 		if row < model.buffer.lineCount()-1 {
 			model.buffer.saveUndoState(model.cursor)
-			model.yankBuffer = "\n"
-			writeClipboardText(model.yankBuffer)
+			model.pushKill("\n", false)
 			model.buffer.joinLines(row, row+1)
 		}
 		return nil
@@ -379,8 +410,7 @@ func handleInsertKillToEndOfLine(model *editorModel) tea.Cmd {
 
 	model.buffer.saveUndoState(model.cursor)
 	deleted := line[model.cursor.Col:]
-	model.yankBuffer = deleted
-	writeClipboardText(model.yankBuffer)
+	model.pushKill(deleted, false)
 	model.buffer.setLine(row, line[:model.cursor.Col])
 	return nil
 }
@@ -394,8 +424,7 @@ func handleInsertKillToStartOfLine(model *editorModel) tea.Cmd {
 
 	model.buffer.saveUndoState(model.cursor)
 	deleted := line[:model.cursor.Col]
-	model.yankBuffer = deleted
-	writeClipboardText(model.yankBuffer)
+	model.pushKill(deleted, true)
 	model.buffer.setLine(row, line[model.cursor.Col:])
 	model.cursor.Col = 0
 	return nil
@@ -415,8 +444,7 @@ func handleInsertDeletePreviousWord(model *editorModel) tea.Cmd {
 
 	model.buffer.saveUndoState(model.cursor)
 	deleted := line[start:model.cursor.Col]
-	model.yankBuffer = deleted
-	writeClipboardText(model.yankBuffer)
+	model.pushKill(deleted, true)
 	model.buffer.setLine(row, line[:start]+line[model.cursor.Col:])
 	model.cursor.Col = start
 	return nil
@@ -436,22 +464,19 @@ func handleInsertDeleteNextWord(model *editorModel) tea.Cmd {
 
 	model.buffer.saveUndoState(model.cursor)
 	deleted := line[model.cursor.Col : end+1]
-	model.yankBuffer = deleted
-	writeClipboardText(model.yankBuffer)
+	model.pushKill(deleted, false)
 	model.buffer.setLine(row, line[:model.cursor.Col]+line[end+1:])
 	return nil
 }
 
 func handleInsertYank(model *editorModel) tea.Cmd {
-	text := readClipboardText()
-	if text == "" {
-		text = model.yankBuffer
-	}
+	text := model.currentKill()
 	if text == "" {
 		return nil
 	}
 
-	return insertTextAtCursor(model, text)
+	insertKilledText(model, text)
+	return nil
 }
 
 func handleInsertTransposeCharacters(model *editorModel) tea.Cmd {
@@ -486,6 +511,7 @@ func handleInsertTransposeCharacters(model *editorModel) tea.Cmd {
 	runes[left], runes[right] = runes[right], runes[left]
 	model.buffer.setLine(row, string(runes))
 	model.cursor.Col = min(pos+1, len(line))
+	model.noteInsertAction(insertActionSelfInsert)
 	return nil
 }
 
@@ -496,12 +522,14 @@ func insertTextAtCursor(model *editorModel, text string) tea.Cmd {
 	lines := strings.Split(text, "\n")
 	if len(lines) == 1 {
 		model.cursor.Col += len(text)
+		model.noteInsertAction(insertActionSelfInsert)
 		model.ensureCursorVisible()
 		return nil
 	}
 
 	model.cursor.Row += len(lines) - 1
 	model.cursor.Col = len(lines[len(lines)-1])
+	model.noteInsertAction(insertActionSelfInsert)
 	model.ensureCursorVisible()
 	return nil
 }
@@ -513,6 +541,7 @@ func handleInsertTab(model *editorModel) tea.Cmd {
 	newLine := line[:model.cursor.Col] + "\t" + line[model.cursor.Col:]
 	model.buffer.setLine(model.cursor.Row, newLine)
 	model.cursor.Col += 1
+	model.noteInsertAction(insertActionSelfInsert)
 	return nil
 }
 
@@ -530,6 +559,7 @@ func handleInsertEnterKey(m *editorModel) tea.Cmd {
 	m.buffer.insertLine(m.cursor.Row+1, newLine)
 	m.cursor.Row++
 	m.cursor.Col = 0
+	m.noteInsertAction(insertActionSelfInsert)
 	m.ensureCursorVisible()
 	return nil
 }
@@ -541,6 +571,9 @@ func moveCursorLeft(model *editorModel) tea.Cmd {
 		}
 	})
 	model.desiredCol = model.cursor.Col
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -557,6 +590,9 @@ func moveCursorDown(model *editorModel) tea.Cmd {
 		}
 	})
 	model.ensureCursorVisible()
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -573,6 +609,9 @@ func moveCursorUp(model *editorModel) tea.Cmd {
 		}
 	})
 	model.ensureCursorVisible()
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -585,6 +624,9 @@ func moveCursorRight(model *editorModel) tea.Cmd {
 		}
 	})
 	model.desiredCol = model.cursor.Col
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -598,12 +640,18 @@ func moveCursorRightOrNextLine(model *editorModel) tea.Cmd {
 	}
 	model.desiredCol = model.cursor.Col
 	model.ensureCursorVisible()
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
 func moveToStartOfLine(model *editorModel) tea.Cmd {
 	model.cursor.Col = 0
 	model.desiredCol = model.cursor.Col
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -615,6 +663,9 @@ func moveToEndOfLine(model *editorModel) tea.Cmd {
 		model.cursor.Col = 0
 	}
 	model.desiredCol = model.cursor.Col
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -745,6 +796,9 @@ func moveToNextWordStart(model *editorModel) tea.Cmd {
 			model.ensureCursorVisible()
 		}
 		model.desiredCol = model.cursor.Col
+		if model.mode == ModeInsert {
+			model.noteInsertAction(insertActionMotion)
+		}
 		return nil
 	}
 
@@ -752,12 +806,22 @@ func moveToNextWordStart(model *editorModel) tea.Cmd {
 		if (i == 0 || isWordSeparator(line[i-1])) && !isWordSeparator(line[i]) {
 			model.cursor.Col = i
 			model.desiredCol = model.cursor.Col
+			if model.mode == ModeInsert {
+				model.noteInsertAction(insertActionMotion)
+			}
 			return nil
 		}
 	}
 
-	model.cursor.Col = max(0, len(line)-1)
+	if model.mode == ModeInsert {
+		model.cursor.Col = len(line)
+	} else {
+		model.cursor.Col = max(0, len(line)-1)
+	}
 	model.desiredCol = model.cursor.Col
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -776,6 +840,9 @@ func moveToPrevWordStart(model *editorModel) tea.Cmd {
 			model.desiredCol = model.cursor.Col
 			model.ensureCursorVisible()
 		}
+		if model.mode == ModeInsert {
+			model.noteInsertAction(insertActionMotion)
+		}
 		return nil
 	}
 
@@ -783,12 +850,18 @@ func moveToPrevWordStart(model *editorModel) tea.Cmd {
 		if (i == 0 || isWordSeparator(line[i-1])) && !isWordSeparator(line[i]) {
 			model.cursor.Col = i
 			model.desiredCol = model.cursor.Col
+			if model.mode == ModeInsert {
+				model.noteInsertAction(insertActionMotion)
+			}
 			return nil
 		}
 	}
 
 	model.cursor.Col = 0
 	model.desiredCol = model.cursor.Col
+	if model.mode == ModeInsert {
+		model.noteInsertAction(insertActionMotion)
+	}
 	return nil
 }
 
@@ -797,7 +870,7 @@ func (m *editorModel) handleOperatorKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	if now.Sub(m.lastKeyTime) > 750*time.Millisecond && len(m.operatorSequence) > 0 {
 		m.pendingOperator = ""
 		m.operatorSequence = nil
-		m.countPrefix = 1
+		m.resetCountPrefix()
 		return m, nil
 	}
 	m.lastKeyTime = now
@@ -805,7 +878,7 @@ func (m *editorModel) handleOperatorKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	if msg.Type == tea.KeyEsc {
 		m.pendingOperator = ""
 		m.operatorSequence = nil
-		m.countPrefix = 1
+		m.resetCountPrefix()
 		return m, nil
 	}
 
@@ -815,22 +888,32 @@ func (m *editorModel) handleOperatorKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	}
 
 	m.operatorSequence = append(m.operatorSequence, keyStr)
-	seq := strings.Join(m.operatorSequence, "")
-
-	if cmd, ok := m.executePendingOperator(seq); ok {
+	if len(m.operatorSequence) == 1 && m.operatorSequence[0] == m.pendingOperator {
+		cmd := executeOperatorMotion(m, m.pendingOperator, motionSpec{kind: "same-line", count: 1})
 		m.pendingOperator = ""
 		m.operatorSequence = nil
-		m.countPrefix = 1
+		m.keySequence = nil
+		m.resetCountPrefix()
 		return m, cmd
 	}
 
-	if isPendingOperatorPrefix(m.pendingOperator, seq) {
+	motion, pending, ok := parseOperatorMotion(m.operatorSequence)
+	if pending {
 		return m, nil
+	}
+	if ok {
+		cmd := executeOperatorMotion(m, m.pendingOperator, motion)
+		m.pendingOperator = ""
+		m.operatorSequence = nil
+		m.keySequence = nil
+		m.resetCountPrefix()
+		return m, cmd
 	}
 
 	m.pendingOperator = ""
 	m.operatorSequence = nil
-	m.countPrefix = 1
+	m.keySequence = nil
+	m.resetCountPrefix()
 	return m, nil
 }
 
@@ -1456,7 +1539,10 @@ func deleteLine(model *editorModel) tea.Cmd {
 }
 
 func pasteAfter(model *editorModel) tea.Cmd {
-	model.yankBuffer = readClipboardText()
+	clipboard := readClipboardText()
+	if clipboard != "" {
+		model.yankBuffer = clipboard
+	}
 	if model.yankBuffer == "" {
 		return nil
 	}
@@ -1541,7 +1627,10 @@ func pasteAfter(model *editorModel) tea.Cmd {
 }
 
 func pasteBefore(model *editorModel) tea.Cmd {
-	model.yankBuffer = readClipboardText()
+	clipboard := readClipboardText()
+	if clipboard != "" {
+		model.yankBuffer = clipboard
+	}
 	if model.yankBuffer == "" {
 		return nil
 	}
@@ -1608,7 +1697,10 @@ func pasteBefore(model *editorModel) tea.Cmd {
 }
 
 func pasteLineAfter(model *editorModel) tea.Cmd {
-	model.yankBuffer = readClipboardText()
+	clipboard := readClipboardText()
+	if clipboard != "" {
+		model.yankBuffer = clipboard
+	}
 	lines := strings.Split(model.yankBuffer[1:], "\n")
 	row := model.cursor.Row
 
@@ -1623,7 +1715,10 @@ func pasteLineAfter(model *editorModel) tea.Cmd {
 }
 
 func pasteLineBefore(model *editorModel) tea.Cmd {
-	model.yankBuffer = readClipboardText()
+	clipboard := readClipboardText()
+	if clipboard != "" {
+		model.yankBuffer = clipboard
+	}
 	lines := strings.Split(model.yankBuffer[1:], "\n")
 	row := model.cursor.Row
 
@@ -2128,7 +2223,7 @@ func getAroundWordBoundary(model *editorModel) (int, int, bool) {
 	for start > 0 && isWordSeparator(line[start-1]) {
 		start--
 	}
-	for end < len(line) && end < len(line) && isWordSeparator(line[end]) {
+	for end < len(line) && isWordSeparator(line[end]) {
 		end++
 	}
 	return start, end - 1, true

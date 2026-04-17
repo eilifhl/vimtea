@@ -216,11 +216,21 @@ func main() {
 - Number prefixes: `5j`, `10k`: Move multiple lines at once
 - `w`: Move to next word start
 - `b`: Move to previous word start
+- `W` / `B`: Move by whitespace-delimited WORDs
+- `e` / `E`: Move to the end of the current word or WORD
+- `ge` / `gE`: Move to the end of the previous word or WORD
 - `0`: Move to start of line
 - `^`: Move to first non-whitespace character in line
 - `$`: Move to end of line
+- `g_`: Move to the last non-whitespace character in line
 - `gg`: Move to start of document
 - `G`: Move to end of document
+- `%`: Jump to the matching bracket
+- `{` / `}`: Move between paragraphs
+- `f<char>` / `F<char>`: Find a character forward or backward
+- `t<char>` / `T<char>`: Move just before or after a character
+- `;` / `,`: Repeat the last find motion
+- `H` / `M` / `L`: Move to the top, middle, or bottom visible line
 - `i`: Enter insert mode
 - `a`: Append after cursor
 - `A`: Append at end of line
@@ -260,7 +270,7 @@ func main() {
 - Arrow keys: Navigate
 - `ctrl+a` / `ctrl+e`: Jump to start or end of line
 - `ctrl+b` / `ctrl+f`: Move left or right one character
-- `ctrl+left` / `ctrl+right`: Jump to previous or next word
+- `ctrl+left` / `ctrl+right`: Move backward or forward by one word
 - `ctrl+p` / `ctrl+n`: Move up or down one line
 - `ctrl+d` / `delete`: Delete the character under the cursor
 - `ctrl+k`: Kill to end of line
@@ -268,8 +278,12 @@ func main() {
 - `ctrl+w` / `alt+backspace`: Delete previous word
 - `alt+d`: Delete next word
 - `ctrl+y`: Yank text back into the buffer
+- `alt+y`: Cycle through the kill ring after a yank
 - `ctrl+t`: Transpose adjacent characters
-- `alt+b` / `alt+f`: Jump to previous or next word
+- `alt+t`: Transpose adjacent words
+- `ctrl+o`: Open a new line without leaving insert mode
+- `alt+b` / `alt+f`: Move backward or forward by one word
+- `alt+<` / `alt+>`: Jump to the start or end of the document
 - Regular typing inserts text
 
 ### Visual Mode

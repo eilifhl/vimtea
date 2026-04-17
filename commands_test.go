@@ -255,7 +255,7 @@ func TestInsertModeEmacsMotions(t *testing.T) {
 
 	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}, Alt: true})
 	updatedModel = updated.(*editorModel)
-	assert.Equal(t, 10, updatedModel.cursor.Col, "alt+f should move to the next word in insert mode")
+	assert.Equal(t, 11, updatedModel.cursor.Col, "alt+f should move forward by one word in insert mode")
 
 	updatedModel.cursor = newCursor(0, 12)
 
@@ -265,7 +265,7 @@ func TestInsertModeEmacsMotions(t *testing.T) {
 
 	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlRight})
 	updatedModel = updated.(*editorModel)
-	assert.Equal(t, 12, updatedModel.cursor.Col, "ctrl+right should move to the next word in insert mode")
+	assert.Equal(t, 11, updatedModel.cursor.Col, "ctrl+right should move forward by one word in insert mode")
 }
 
 func TestInsertModeEmacsKillAndYankCommands(t *testing.T) {
@@ -384,6 +384,101 @@ func TestInnerAndAroundQuoteCommands(t *testing.T) {
 	updatedModel = updated.(*editorModel)
 
 	assert.Equal(t, `prefix  suffix`, updatedModel.buffer.text(), `da' should delete the contents and surrounding single quotes`)
+}
+
+func TestAdditionalVimMotions(t *testing.T) {
+	editor := NewEditor(WithContent("alpha beta gamma\n\n(delta)\n{block}"))
+	model := editor.(*editorModel)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	updatedModel := updated.(*editorModel)
+	assert.Equal(t, 4, updatedModel.cursor.Col, "e should move to the end of the current word")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 4, updatedModel.cursor.Col, "ge at the first word should stay on the current word end")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 13, updatedModel.cursor.Col, "fm should find the next matching character")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{';'}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 14, updatedModel.cursor.Col, "; should repeat the last find motion")
+}
+
+func TestBracketMatchAndWordObjects(t *testing.T) {
+	editor := NewEditor(WithContent("before [middle] after\n{block text}"))
+	model := editor.(*editorModel)
+
+	model.cursor = newCursor(0, 7)
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updatedModel := updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "before [] after\n{block text}", updatedModel.buffer.text(), "di[ should delete inside square brackets")
+
+	editor = NewEditor(WithContent("{alpha beta}"))
+	model = editor.(*editorModel)
+	model.cursor = newCursor(0, 1)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'B'}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "", updatedModel.buffer.text(), "caB should delete braces and contents")
+	assert.Equal(t, ModeInsert, updatedModel.mode, "caB should enter insert mode")
+
+	editor = NewEditor(WithContent("(alpha)\nnext"))
+	model = editor.(*editorModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'%'}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, 6, updatedModel.cursor.Col, "% should jump to the matching bracket")
+}
+
+func TestInsertModeYankPopAndTransposeWords(t *testing.T) {
+	editor := NewEditor(WithContent("hello brave world"))
+	model := editor.(*editorModel)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel := updated.(*editorModel)
+	updatedModel.cursor = newCursor(0, 6)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlK})
+	updatedModel = updated.(*editorModel)
+	updatedModel.cursor = newCursor(0, 6)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	updatedModel = updated.(*editorModel)
+
+	editor = NewEditor(WithContent(""))
+	model = editor.(*editorModel)
+	model.mode = ModeInsert
+	model.killRing = append(model.killRing, "world", "hello brave ")
+	model.yankBuffer = "world"
+	model.cursor = newCursor(0, 0)
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "world", updatedModel.buffer.text(), "ctrl+y should insert the latest kill-ring entry")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}, Alt: true})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hello brave ", updatedModel.buffer.text(), "alt+y should replace the previous yank with the next kill-ring entry")
+
+	editor = NewEditor(WithContent("brave hello world"))
+	model = editor.(*editorModel)
+	model.mode = ModeInsert
+	model.cursor = newCursor(0, 11)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}, Alt: true})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "brave world hello", updatedModel.buffer.text(), "alt+t should transpose the adjacent words around point")
 }
 
 func TestWrappedMovementCommands(t *testing.T) {

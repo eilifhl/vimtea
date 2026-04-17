@@ -89,11 +89,19 @@ type editorModel struct {
 	pendingReplace    bool       // Waiting for the replacement character after pressing r
 	pendingOperator   string     // Pending normal-mode operator such as d, c, or y
 	operatorSequence  []string   // Keys collected after a pending operator
-	commandBuffer     string     // Command mode input buffer
-	visualStart       Cursor     // Start position of visual selection
-	isVisualLine      bool       // Whether we're in line-wise visual mode (V)
+	pendingFind       *pendingFindState
+	lastFind          *findMotionState
+	commandBuffer     string // Command mode input buffer
+	visualStart       Cursor // Start position of visual selection
+	isVisualLine      bool   // Whether we're in line-wise visual mode (V)
 
-	countPrefix int // Numeric prefix for commands like "10j"
+	countPrefix    int  // Numeric prefix for commands like "10j"
+	hasCountPrefix bool // Whether the current count prefix was explicitly provided
+
+	killRing         []string
+	killRingIndex    int
+	lastInsertAction insertActionKind
+	lastYankRange    *TextRange
 
 	relativeNumbers bool // Whether to show relative line numbers
 
@@ -190,6 +198,7 @@ func NewEditor(opts ...EditorOption) Editor {
 		selectedStyle:          options.SelectedStyle,
 		relativeNumbers:        options.RelativeNumbers,
 		countPrefix:            1,
+		killRing:               []string{},
 
 		highlighter:    newSyntaxHighlighter(options.DefaultSyntaxTheme, options.FileName),
 		yankHighlight:  newYankHighlight(),
@@ -339,6 +348,10 @@ func (m *editorModel) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingReplace = false
 	}
 
+	if m.pendingFind != nil && (m.mode == ModeNormal || m.mode == ModeVisual) {
+		return m.handlePendingFind(msg)
+	}
+
 	switch m.mode {
 	case ModeNormal:
 		if m.pendingOperator != "" {
@@ -347,7 +360,7 @@ func (m *editorModel) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		if msg.Type == tea.KeyRunes && len(msg.Runes) == 1 && msg.Runes[0] == 'r' && !msg.Alt {
 			m.keySequence = []string{}
-			m.countPrefix = 1
+			m.resetCountPrefix()
 			m.pendingReplace = true
 			return m, nil
 		}
@@ -357,7 +370,7 @@ func (m *editorModel) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			case 'd', 'c', 'y':
 				m.pendingOperator = string(msg.Runes[0])
 				m.operatorSequence = []string{}
-				m.keySequence = []string{}
+				m.keySequence = []string{string(msg.Runes[0])}
 				return m, nil
 			}
 		}
@@ -374,6 +387,7 @@ func (m *editorModel) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			// Insert regular characters
 			if len(msg.String()) == 1 {
+				m.noteInsertAction(insertActionSelfInsert)
 				return insertCharacter(m, msg.String())
 			}
 		}
@@ -412,13 +426,13 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 			if binding := m.registry.FindExact(seq, mode); binding != nil {
 				cmd := binding.Command(m)
 				m.keySequence = []string{}
-				m.countPrefix = 1
+				m.resetCountPrefix()
 				return m, cmd
 			}
 
 			// Reset sequence if timeout reached
 			m.keySequence = []string{}
-			m.countPrefix = 1
+			m.resetCountPrefix()
 		}
 		m.lastKeyTime = now
 
@@ -429,6 +443,7 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 			// First digit in sequence
 			count, _ := strconv.Atoi(keyStr)
 			m.countPrefix = count
+			m.hasCountPrefix = true
 			m.keySequence = append(m.keySequence, keyStr)
 			return m, nil
 		} else if len(m.keySequence) > 0 && keyStr >= "0" && keyStr <= "9" {
@@ -446,6 +461,7 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 				countStr := strings.Join(m.keySequence, "") + keyStr
 				count, _ := strconv.Atoi(countStr)
 				m.countPrefix = count
+				m.hasCountPrefix = true
 				m.keySequence = append(m.keySequence, keyStr)
 				return m, nil
 			}
@@ -459,7 +475,7 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 		if binding := m.registry.FindExact(seq, mode); binding != nil {
 			cmd := binding.Command(m)
 			m.keySequence = []string{}
-			defer func() { m.countPrefix = 1 }()
+			defer m.resetCountPrefix()
 			return m, cmd
 		}
 
@@ -483,7 +499,7 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 			if binding := m.registry.FindExact(cmdPart, mode); binding != nil {
 				cmd := binding.Command(m)
 				m.keySequence = []string{}
-				defer func() { m.countPrefix = 1 }()
+				defer m.resetCountPrefix()
 				return m, cmd
 			}
 		}
@@ -493,7 +509,7 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 			if binding := m.registry.FindExact(keyStr, mode); binding != nil {
 				cmd := binding.Command(m)
 				m.keySequence = []string{}
-				defer func() { m.countPrefix = 1 }()
+				defer m.resetCountPrefix()
 				return m, cmd
 			}
 		} else {
@@ -504,14 +520,14 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 			if binding := m.registry.FindExact(lastKey, mode); binding != nil {
 				cmd := binding.Command(m)
 				m.keySequence = []string{}
-				defer func() { m.countPrefix = 1 }()
+				defer m.resetCountPrefix()
 				return m, cmd
 			}
 		}
 
 		// No match found, reset everything
 		m.keySequence = []string{}
-		m.countPrefix = 1
+		m.resetCountPrefix()
 		return m, nil
 	}
 }
@@ -611,7 +627,13 @@ func (m *editorModel) Reset() tea.Cmd {
 	m.desiredCol = 0
 	m.visualStart = newCursor(0, 0)
 	m.isVisualLine = false
-	m.countPrefix = 1
+	m.resetCountPrefix()
+	m.pendingFind = nil
+	m.lastFind = nil
+	m.killRing = nil
+	m.killRingIndex = 0
+	m.lastInsertAction = insertActionNone
+	m.lastYankRange = nil
 
 	// Reset viewport
 	m.viewport.YOffset = 0
@@ -623,6 +645,11 @@ func (m *editorModel) Reset() tea.Cmd {
 
 // statusMessageMsg is a message type for updating the status message
 type statusMessageMsg string
+
+func (m *editorModel) resetCountPrefix() {
+	m.countPrefix = 1
+	m.hasCountPrefix = false
+}
 
 // WithContent sets the initial content for the editor
 func WithContent(content string) EditorOption {
