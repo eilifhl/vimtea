@@ -19,3 +19,4 @@ go.work
 
 # Log files
 debug.log
+/third_party/
