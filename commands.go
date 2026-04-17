@@ -348,6 +348,21 @@ func insertCharacter(model *editorModel, char string) (tea.Model, tea.Cmd) {
 	}
 
 	line := model.buffer.Line(model.cursor.Row)
+
+	if closer, ok := autoInsertClosingDelimiter(char); ok {
+		newLine := line[:model.cursor.Col] + char + closer + line[model.cursor.Col:]
+		model.buffer.setLine(model.cursor.Row, newLine)
+		model.cursor.Col++
+		model.noteInsertAction(insertActionSelfInsert)
+		return model, nil
+	}
+
+	if shouldSkipClosingDelimiter(line, model.cursor.Col, char) {
+		model.cursor.Col++
+		model.noteInsertAction(insertActionSelfInsert)
+		return model, nil
+	}
+
 	newLine := line[:model.cursor.Col] + char + line[model.cursor.Col:]
 	model.buffer.setLine(model.cursor.Row, newLine)
 	model.cursor.Col++
@@ -360,6 +375,13 @@ func handleInsertBackspace(model *editorModel) tea.Cmd {
 	model.buffer.saveUndoState(model.cursor)
 
 	if model.cursor.Col > 0 {
+		line := model.buffer.Line(model.cursor.Row)
+		if shouldDeleteAutoInsertedPair(line, model.cursor.Col) {
+			model.buffer.deleteAt(model.cursor.Row, model.cursor.Col-1, model.cursor.Row, model.cursor.Col)
+			model.cursor.Col--
+			model.noteInsertAction(insertActionSelfInsert)
+			return nil
+		}
 
 		model.buffer.deleteAt(model.cursor.Row, model.cursor.Col-1, model.cursor.Row, model.cursor.Col-1)
 		model.cursor.Col--
@@ -374,6 +396,60 @@ func handleInsertBackspace(model *editorModel) tea.Cmd {
 	}
 	model.noteInsertAction(insertActionSelfInsert)
 	return nil
+}
+
+func autoInsertClosingDelimiter(char string) (string, bool) {
+	switch char {
+	case "(":
+		return ")", true
+	case "[":
+		return "]", true
+	case "{":
+		return "}", true
+	case `"`:
+		return `"`, true
+	case "'":
+		return "'", true
+	default:
+		return "", false
+	}
+}
+
+func shouldSkipClosingDelimiter(line string, col int, char string) bool {
+	if col < 0 || col >= len(line) {
+		return false
+	}
+
+	switch char {
+	case ")", "]", "}", `"`, "'":
+		return string(line[col]) == char
+	default:
+		return false
+	}
+}
+
+func shouldDeleteAutoInsertedPair(line string, col int) bool {
+	if col <= 0 || col >= len(line) {
+		return false
+	}
+
+	open := line[col-1]
+	close := line[col]
+
+	switch open {
+	case '(':
+		return close == ')'
+	case '[':
+		return close == ']'
+	case '{':
+		return close == '}'
+	case '"':
+		return close == '"'
+	case '\'':
+		return close == '\''
+	default:
+		return false
+	}
 }
 
 func handleInsertDeleteForward(model *editorModel) tea.Cmd {

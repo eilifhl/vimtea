@@ -223,6 +223,61 @@ func TestInsertModeDeleteForward(t *testing.T) {
 	assert.Equal(t, "hllo", updatedModel.buffer.text(), "delete at end of line should be a no-op")
 }
 
+func TestInsertModeAutoClosesDelimiters(t *testing.T) {
+	editor := NewEditor(WithContent(""))
+	model := editor.(*editorModel)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel := updated.(*editorModel)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'('}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "()", updatedModel.buffer.text(), "typing an opening parenthesis should insert the closing pair")
+	assert.Equal(t, 1, updatedModel.cursor.Col, "cursor should stay inside the inserted parentheses")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "([])", updatedModel.buffer.text(), "typing an opening bracket should insert the closing pair")
+	assert.Equal(t, 2, updatedModel.cursor.Col, "cursor should stay inside the inserted brackets")
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'{'}})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "([{}])", updatedModel.buffer.text(), "typing an opening brace should insert the closing pair")
+	assert.Equal(t, 3, updatedModel.cursor.Col, "cursor should stay inside the inserted braces")
+}
+
+func TestInsertModeSkipsExistingClosingDelimiter(t *testing.T) {
+	editor := NewEditor(WithContent(""))
+	model := editor.(*editorModel)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel := updated.(*editorModel)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'('}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{')'}})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "()", updatedModel.buffer.text(), "typing the closing delimiter at the pair boundary should move over it")
+	assert.Equal(t, 2, updatedModel.cursor.Col, "cursor should advance past the existing closing delimiter")
+}
+
+func TestInsertModeBackspaceDeletesAutoInsertedPair(t *testing.T) {
+	editor := NewEditor(WithContent(""))
+	model := editor.(*editorModel)
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	updatedModel := updated.(*editorModel)
+
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'('}})
+	updatedModel = updated.(*editorModel)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	updatedModel = updated.(*editorModel)
+
+	assert.Equal(t, "", updatedModel.buffer.text(), "backspace inside an auto-inserted pair should remove both delimiters")
+	assert.Equal(t, 0, updatedModel.cursor.Col, "cursor should move back to the original insertion point")
+}
+
 func TestInsertModeEmacsMotions(t *testing.T) {
 	editor := NewEditor(WithContent("hello world\nsecond line"))
 	model := editor.(*editorModel)
