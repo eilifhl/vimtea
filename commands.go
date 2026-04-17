@@ -168,6 +168,7 @@ func registerBindings(m *editorModel) {
 	m.registry.Add("ctrl+w", handleInsertDeletePreviousWord, ModeInsert, "Delete previous word")
 	m.registry.Add("ctrl+y", handleInsertYank, ModeInsert, "Yank text")
 	m.registry.Add("alt+d", handleInsertDeleteNextWord, ModeInsert, "Delete next word")
+	m.registry.Add("alt+delete", handleInsertDeleteNextWord, ModeInsert, "Delete next word")
 	m.registry.Add("alt+backspace", handleInsertDeletePreviousWord, ModeInsert, "Delete previous word")
 	m.registry.Add("alt+y", handleInsertYankPop, ModeInsert, "Cycle yanked text")
 	m.registry.Add("ctrl+t", handleInsertTransposeCharacters, ModeInsert, "Transpose characters")

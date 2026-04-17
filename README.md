@@ -276,7 +276,7 @@ func main() {
 - `ctrl+k`: Kill to end of line
 - `ctrl+u`: Kill to start of line
 - `ctrl+w` / `alt+backspace`: Delete previous word
-- `alt+d`: Delete next word
+- `alt+d` / `alt+delete`: Delete next word
 - `ctrl+y`: Yank text back into the buffer
 - `alt+y`: Cycle through the kill ring after a yank
 - `ctrl+t`: Transpose adjacent characters

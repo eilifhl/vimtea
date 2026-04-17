@@ -315,6 +315,17 @@ func TestInsertModeWordDeletionMacros(t *testing.T) {
 	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}, Alt: true})
 	updatedModel = updated.(*editorModel)
 	assert.Equal(t, "hello world", updatedModel.buffer.text(), "alt+d should delete the next word")
+
+	editor = NewEditor(WithContent("hello brave world"))
+	model = editor.(*editorModel)
+	keyMsg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}}
+	updated, _ = model.Update(keyMsg)
+	updatedModel = updated.(*editorModel)
+
+	updatedModel.cursor = newCursor(0, 6)
+	updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyDelete, Alt: true})
+	updatedModel = updated.(*editorModel)
+	assert.Equal(t, "hello world", updatedModel.buffer.text(), "alt+delete should delete the next word")
 }
 
 func TestInsertModeTransposeCharacters(t *testing.T) {
