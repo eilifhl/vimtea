@@ -75,6 +75,12 @@ func insertCharacter(model *editorModel, char string) (tea.Model, tea.Cmd) {
 
 	line := model.buffer.Line(model.cursor.Row)
 
+	if isSymmetricAutoClosingDelimiter(char) && shouldSkipClosingDelimiter(line, model.cursor.Col, char) {
+		model.cursor.Col++
+		model.noteInsertAction(insertActionSelfInsert)
+		return model, nil
+	}
+
 	if closer, ok := autoInsertClosingDelimiter(char); ok {
 		newLine := line[:model.cursor.Col] + char + closer + line[model.cursor.Col:]
 		model.buffer.setLine(model.cursor.Row, newLine)
@@ -95,6 +101,15 @@ func insertCharacter(model *editorModel, char string) (tea.Model, tea.Cmd) {
 	model.noteInsertAction(insertActionSelfInsert)
 
 	return model, nil
+}
+
+func isSymmetricAutoClosingDelimiter(char string) bool {
+	switch char {
+	case `"`, "'":
+		return true
+	default:
+		return false
+	}
 }
 
 func handleInsertBackspace(model *editorModel) tea.Cmd {

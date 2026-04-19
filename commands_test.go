@@ -262,6 +262,25 @@ func TestInsertModeSkipsExistingClosingDelimiter(t *testing.T) {
 	assert.Equal(t, 2, updatedModel.cursor.Col, "cursor should advance past the existing closing delimiter")
 }
 
+func TestInsertModeSkipsExistingClosingQuote(t *testing.T) {
+	for _, quote := range []rune{'"', '\''} {
+		editor := NewEditor(WithContent(""))
+		model := editor.(*editorModel)
+
+		updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+		updatedModel := updated.(*editorModel)
+
+		updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{quote}})
+		updatedModel = updated.(*editorModel)
+		updated, _ = updatedModel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{quote}})
+		updatedModel = updated.(*editorModel)
+
+		expected := string([]rune{quote, quote})
+		assert.Equal(t, expected, updatedModel.buffer.text(), "typing the closing quote at the pair boundary should move over it")
+		assert.Equal(t, 2, updatedModel.cursor.Col, "cursor should advance past the existing closing quote")
+	}
+}
+
 func TestInsertModeBackspaceDeletesAutoInsertedPair(t *testing.T) {
 	editor := NewEditor(WithContent(""))
 	model := editor.(*editorModel)
